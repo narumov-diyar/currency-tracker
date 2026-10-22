@@ -78,3 +78,20 @@ func TestGenerateRejectsBadInput(t *testing.T) {
 		t.Errorf("span shorter than the step must yield no candles, got %d", len(got))
 	}
 }
+
+// Цены выражены в USDT, поэтому цена самого USDT равна единице: блуждание
+// увело бы пару BTC/USDT от цены биткойна.
+func TestGenerateKeepsQuoteAssetAtOne(t *testing.T) {
+	asset := Asset{ID: 1, Symbol: QuoteSymbol, ResolutionSeconds: 60}
+	candles := Generate(asset, 48*time.Hour, time.Now(), rand.New(rand.NewSource(7)))
+
+	if len(candles) == 0 {
+		t.Fatal("ряд пуст")
+	}
+	for _, c := range candles {
+		if c.Open != 1 || c.High != 1 || c.Low != 1 || c.Close != 1 {
+			t.Fatalf("свеча %v: цены %g/%g/%g/%g, ожидалась единица во всех четырёх",
+				c.CollectedAt, c.Open, c.High, c.Low, c.Close)
+		}
+	}
+}

@@ -27,6 +27,11 @@ type Candle struct {
 	Turnover    float64
 }
 
+// QuoteSymbol — актив, в котором выражены цены всех остальных. Его
+// собственная цена равна единице по определению, поэтому ряд для него
+// не блуждает: иначе пара BTC/USDT расходилась бы с ценой биткойна.
+const QuoteSymbol = "USDT"
+
 // startPrice задаёт правдоподобный порядок величины: без этого все активы
 // стартовали бы с одной цены и графики выглядели бы одинаково.
 //
@@ -76,7 +81,10 @@ func Generate(asset Asset, span time.Duration, now time.Time, rnd *rand.Rand) []
 	// Фиатные курсы колеблются слабее криптовалютных, иначе рубль
 	// на графике вёл бы себя как мем-монета.
 	volatility := 0.0015
-	if asset.ResolutionSeconds >= 86400 {
+	switch {
+	case asset.Symbol == QuoteSymbol:
+		volatility = 0
+	case asset.ResolutionSeconds >= 86400:
 		volatility = 0.004
 	}
 
