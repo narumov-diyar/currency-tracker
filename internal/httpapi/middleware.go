@@ -1,7 +1,10 @@
 package httpapi
 
 import (
+	"bufio"
+	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"time"
 )
@@ -16,6 +19,24 @@ type statusRecorder struct {
 func (r *statusRecorder) WriteHeader(status int) {
 	r.status = status
 	r.ResponseWriter.WriteHeader(status)
+}
+
+// Unwrap открывает доступ к исходному writer-у.
+//
+// Без него обёртка прячет возможности оригинала, и переключение протокола
+// становится невозможным: WebSocket забирает соединение у HTTP-сервера
+// напрямую, а обёртка такой запрос не пропускает. Первая же попытка
+// подключиться к потоку отвечала 501.
+func (r *statusRecorder) Unwrap() http.ResponseWriter {
+	return r.ResponseWriter
+}
+
+func (r *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hijacker, ok := r.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, errors.New("the underlying writer does not support hijacking")
+	}
+	return hijacker.Hijack()
 }
 
 // requestLogger пишет в STDOUT метод, путь, код и длительность каждого запроса.

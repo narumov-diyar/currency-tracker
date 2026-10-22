@@ -17,6 +17,7 @@ import (
 	"github.com/narumov-diyar/currency-tracker/internal/config"
 	"github.com/narumov-diyar/currency-tracker/internal/httpapi"
 	"github.com/narumov-diyar/currency-tracker/internal/storage"
+	"github.com/narumov-diyar/currency-tracker/internal/stream"
 )
 
 // Срок жизни сессионного токена.
@@ -59,6 +60,9 @@ func run(logger *slog.Logger) error {
 		logger.Info("migrations applied", "versions", applied)
 	}
 
+	hub := stream.NewHub(stream.DefaultSize)
+	go stream.NewListener(pool, hub, logger).Run(ctx)
+
 	alertStore := storage.NewAlerts(pool)
 	go alerts.NewListener(pool, alerts.NewService(alertStore, logger), logger).Run(ctx)
 
@@ -70,6 +74,7 @@ func run(logger *slog.Logger) error {
 		Candles:       storage.NewCandles(pool),
 		Alerts:        storage.NewAlerts(pool),
 		Notifications: storage.NewNotifications(pool),
+		Hub:           hub,
 		Tokens:        auth.NewTokenIssuer(cfg.AuthSecret, tokenTTL),
 		Logger:        logger,
 	})

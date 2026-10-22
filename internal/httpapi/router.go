@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/narumov-diyar/currency-tracker/internal/storage"
+	"github.com/narumov-diyar/currency-tracker/internal/stream"
 )
 
 // Pinger описывает ту часть пула соединений, которая нужна обработчикам.
@@ -54,6 +55,13 @@ type AlertStore interface {
 	Delete(ctx context.Context, userID, ruleID int64) error
 }
 
+// Hub раздаёт котировки реального времени подключённым клиентам.
+type Hub interface {
+	Subscribe(assets ...int) *stream.Subscriber
+	Unsubscribe(sub *stream.Subscriber)
+	Snapshot(assetID int) []stream.Point
+}
+
 type Deps struct {
 	DB            Pinger
 	Users         UserStore
@@ -62,6 +70,7 @@ type Deps struct {
 	Candles       CandleStore
 	Alerts        AlertStore
 	Notifications NotificationStore
+	Hub           Hub
 	Tokens        TokenIssuer
 	Logger        *slog.Logger
 }
@@ -74,6 +83,7 @@ type Server struct {
 	candles       CandleStore
 	alerts        AlertStore
 	notifications NotificationStore
+	hub           Hub
 	tokens        TokenIssuer
 	logger        *slog.Logger
 }
@@ -87,6 +97,7 @@ func NewRouter(d Deps) http.Handler {
 		candles:       d.Candles,
 		alerts:        d.Alerts,
 		notifications: d.Notifications,
+		hub:           d.Hub,
 		tokens:        d.Tokens,
 		logger:        d.Logger,
 	}
@@ -112,6 +123,8 @@ func NewRouter(d Deps) http.Handler {
 
 	mux.HandleFunc("GET /api/notifications", s.requireAuth(s.listNotifications))
 	mux.HandleFunc("POST /api/notifications/seen", s.requireAuth(s.markNotificationsSeen))
+
+	mux.HandleFunc("GET /api/stream", s.requireAuth(s.stream))
 
 	return requestLogger(d.Logger)(mux)
 }
