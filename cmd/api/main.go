@@ -16,6 +16,7 @@ import (
 	"github.com/narumov-diyar/currency-tracker/internal/auth"
 	"github.com/narumov-diyar/currency-tracker/internal/config"
 	"github.com/narumov-diyar/currency-tracker/internal/httpapi"
+	"github.com/narumov-diyar/currency-tracker/internal/rollup"
 	"github.com/narumov-diyar/currency-tracker/internal/storage"
 )
 
@@ -61,6 +62,12 @@ func run(logger *slog.Logger) error {
 
 	alertStore := storage.NewAlerts(pool)
 	go alerts.NewListener(pool, alerts.NewService(alertStore, logger), logger).Run(ctx)
+
+	if err := rollup.Validate(rollup.DefaultTiers); err != nil {
+		return err
+	}
+	go rollup.NewService(storage.NewRollups(pool), rollup.DefaultTiers, logger).
+		Loop(ctx, cfg.RollupInterval)
 
 	router := httpapi.NewRouter(httpapi.Deps{
 		DB:            pool,
