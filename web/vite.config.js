@@ -9,7 +9,10 @@ export default defineConfig(({ mode }) => {
   const proxy = {
     '/api': {
       target: env.API_URL || 'http://127.0.0.1:8080',
-      changeOrigin: true,
+      // changeOrigin не включаем: он подменяет заголовок Host на адрес
+      // сервера, а библиотека WebSocket сверяет Host с Origin браузера
+      // и отклоняет подключение с кодом 403.
+      changeOrigin: false,
       ws: true,
     },
   };
