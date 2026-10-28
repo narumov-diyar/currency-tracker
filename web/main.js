@@ -657,6 +657,10 @@ let realtimePoints = [];
 // Поток присылает цены сторон по отдельности, а показывать надо курс пары.
 let realtimeSnapshots = {};
 let realtimeLatest = {};
+// Подпись ставится по снимку при подключении, когда буфер котируемой
+// стороны ещё может быть пуст. Если её котировки пойдут позже, подпись
+// нужно поправить, иначе она так и останется неверной.
+let realtimeBaseOnly = false;
 
 function startRealtimeStream() {
   stopRealtimeStream();
@@ -700,6 +704,11 @@ function startRealtimeStream() {
       for (const tick of msg.ticks) {
         realtimeLatest[tick.symbol] = tick.v;
         if (tick.t > at) at = tick.t;
+      }
+
+      if (realtimeBaseOnly && realtimeLatest[quote] !== undefined) {
+        realtimeBaseOnly = false;
+        setChartMeta('Детализация: 1 секунда · окно 15 минут');
       }
 
       const value = crossRate(realtimeLatest, base, quote);
@@ -784,6 +793,7 @@ function initRealtimeChart(points, baseOnly) {
 
   const base = state.selectedPair.base.symbol;
   const quote = state.selectedPair.quote.symbol;
+  realtimeBaseOnly = !!baseOnly;
   setChartMeta(baseOnly
     ? `Котировки ${quote} в потоке не передаются: показана цена ${base} в USDT`
     : 'Детализация: 1 секунда · окно 15 минут');
