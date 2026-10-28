@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Currency Tracker</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+
+  <div id="auth-view" class="center-container">
+    <div class="card auth-card">
+      <h2 id="auth-title">Вход в систему</h2>
+      <div id="auth-error" class="alert-error hidden"></div>
+
+      <form id="auth-form">
+        <div class="form-group">
+          <label for="auth-email">Электронная почта</label>
+          <input type="email" id="auth-email" required placeholder="user@example.com">
+        </div>
+        <div class="form-group">
+          <label for="auth-password">Пароль (не менее 8 символов)</label>
+          <input type="password" id="auth-password" required minlength="8" placeholder="••••••••">
+        </div>
+        <button type="submit" id="auth-submit-btn" class="btn btn-primary full-width">Войти</button>
+      </form>
+
+      <div class="auth-toggle">
+        <span id="toggle-text">Нет аккаунта?</span>
+        <button id="toggle-btn" class="btn-link">Зарегистрироваться</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="app-view" class="app-layout hidden">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h3>Отслеживаемые пары</h3>
+        <button id="logout-btn" class="btn-small">Выйти</button>
+      </div>
+
+      <div id="watchlist-container" class="watchlist-list">
+      </div>
+
+      <div class="sidebar-footer">
+        <button id="open-add-dialog-btn" class="btn btn-primary full-width">+ Добавить пару</button>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <header class="content-header">
+        <div>
+          <h2 id="selected-pair-title">Выберите пару слева</h2>
+          <div id="selected-pair-meta" class="meta-info"></div>
+        </div>
+
+        <div class="header-controls">
+          <div class="mode-switch">
+            <button class="btn-toggle active" data-mode="cross">Кросс-курс</button>
+            <button class="btn-toggle" data-mode="compare">Сравнение динамики</button>
+          </div>
+
+          <div class="period-switch">
+            <button class="btn-period active" data-period="1h">1h</button>
+            <button class="btn-period" data-period="4h">4h</button>
+            <button class="btn-period" data-period="1d">1d</button>
+            <button class="btn-period" data-period="1w">1w</button>
+            <button class="btn-period realtime-tab" data-period="rt">🔴 Realtime (15м)</button>
+          </div>
+        </div>
+      </header>
+
+      <section class="chart-section">
+        <div id="chart-area" class="chart-box" style="position: relative; width: 100%; height: 100%;">
+          <canvas id="main-chart"></canvas>
+          <div id="chart-empty-state" class="empty-placeholder hidden">Нет данных за выбранный период</div>
+          <div id="realtime-status-banner" class="status-banner hidden"></div>
+        </div>
+        <div id="chart-meta" class="chart-meta"></div>
+      </section>
+
+      <section class="analytics-section">
+        <h4>Показатели пары за период</h4>
+        <div id="analytics-box" class="analytics-grid">
+          <small class="analytics-empty">Показатели появятся вместе с графиком</small>
+        </div>
+      </section>
+
+      <section class="alerts-section">
+        <div class="alerts-header">
+          <h4>Оповещения и правила</h4>
+          <span id="unread-alerts-badge" class="badge">0</span>
+        </div>
+
+        <form id="create-alert-form" class="alerts-form">
+          <select id="alert-target-select"></select>
+          <select id="alert-type-select">
+            <option value="above">Курс выше (&gt;)</option>
+            <option value="below">Курс ниже (&lt;)</option>
+            <option value="growth">Рост более (%) за интервал</option>
+            <option value="drop">Падение более (%) за интервал</option>
+          </select>
+          <select id="alert-interval-select">
+            <option value="15">за 15 мин</option>
+            <option value="60" selected>за 1 час</option>
+            <option value="1440">за сутки</option>
+          </select>
+          <input type="number" id="alert-value-input" step="any" placeholder="Порог или %" required>
+          <button type="submit" class="btn-small btn-primary">+ Добавить правило</button>
+        </form>
+
+        <div id="alert-error" class="alert-error hidden"></div>
+        <div id="alert-hint" class="alert-hint"></div>
+
+        <div id="alerts-list" class="alerts-list"></div>
+      </section>
+
+      <section class="alerts-section">
+        <div class="alerts-header">
+          <h4>Уведомления</h4>
+          <button id="mark-seen-btn" class="btn-small">Отметить прочитанными</button>
+        </div>
+        <div id="notifications-list" class="alerts-list">
+          <small class="muted">Непрочитанных уведомлений нет</small>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="add-pair-modal" class="modal">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3>Добавить валютную пару</h3>
+        <button id="close-add-modal-btn" class="close-btn">&times;</button>
+      </div>
+      <div id="add-pair-error" class="alert-error hidden"></div>
+      <form id="add-pair-form">
+        <div class="form-group">
+          <label for="base-asset-select">Базовый актив (Base):</label>
+          <select id="base-asset-select" required></select>
+        </div>
+        <div class="form-group">
+          <label for="quote-asset-select">Котируемый актив (Quote):</label>
+          <select id="quote-asset-select" required></select>
+        </div>
+        <div class="modal-actions">
+          <button type="button" id="cancel-add-btn" class="btn btn-secondary">Отмена</button>
+          <button type="submit" class="btn btn-primary">Добавить</button>
+        </div>
+      </form>
+    </div>
+  </dialog>
+
+  <script type="module" src="./main.js"></script>
+</body>
+</html>

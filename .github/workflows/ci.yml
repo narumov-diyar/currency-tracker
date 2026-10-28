@@ -146,3 +146,34 @@ jobs:
 
       - name: Тесты
         run: python -m pytest collector
+
+  web:
+    name: Клиентская часть
+    runs-on: ubuntu-latest
+
+    # Все команды выполняются в папке клиента: package.json лежит там,
+    # а не в корне репозитория.
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Vite 8 требует Node не ниже 22.12.
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # npm ci, а не npm install: ставит ровно то, что записано
+      # в package-lock.json, и падает, если он разошёлся с package.json.
+      - name: Установка зависимостей
+        run: npm ci
+
+      - name: Тесты
+        run: npm test
+
+      - name: Сборка
+        run: npm run build
