@@ -328,7 +328,13 @@ func (e *env) seedCandles(t *testing.T) {
 
 	ctx := context.Background()
 	rnd := rand.New(rand.NewSource(42))
-	now := time.Now().UTC().Truncate(time.Minute)
+
+	// Генератор заканчивает ряд за шаг до переданного момента, а момент
+	// округляется вниз до минуты. Без добавочной минуты свежайшая свеча
+	// оказывалась почти двухминутной уже при записи, и пара успевала стать
+	// устаревшей до проверки: сервер считает устаревшим всё старше двух
+	// интервалов актива, то есть 120 секунд для криптовалюты.
+	now := time.Now().UTC().Truncate(time.Minute).Add(time.Minute)
 
 	for _, symbol := range []string{"BTC", "USDT"} {
 		id := e.assetID(t, symbol)
