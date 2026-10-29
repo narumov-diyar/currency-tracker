@@ -3,152 +3,230 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Currency Tracker</title>
+  <title>Currency Tracker — курсы валют и криптовалют</title>
+  <link rel="icon" type="image/svg+xml" href="./icon.svg">
   <link rel="stylesheet" href="./style.css">
 </head>
 <body>
 
-  <div id="auth-view" class="center-container">
-    <div class="card auth-card">
-      <h2 id="auth-title">Вход в систему</h2>
-      <div id="auth-error" class="alert-error hidden"></div>
+  <!-- ——— вход и регистрация ——————————————————————————————————— -->
+  <div id="auth-view" class="auth-screen">
+    <div class="auth-glow"></div>
 
-      <form id="auth-form">
-        <div class="form-group">
-          <label for="auth-email">Электронная почта</label>
-          <input type="email" id="auth-email" required placeholder="user@example.com">
-        </div>
-        <div class="form-group">
-          <label for="auth-password">Пароль (не менее 8 символов)</label>
-          <input type="password" id="auth-password" required minlength="8" placeholder="••••••••">
-        </div>
-        <button type="submit" id="auth-submit-btn" class="btn btn-primary full-width">Войти</button>
-      </form>
-
-      <div class="auth-toggle">
-        <span id="toggle-text">Нет аккаунта?</span>
-        <button id="toggle-btn" class="btn-link">Зарегистрироваться</button>
+    <div class="auth-card">
+      <div class="brand brand-lg">
+        <img src="./icon.svg" alt="" class="brand-mark" width="32" height="32">
+        <span class="brand-name">Currency<b>Tracker</b></span>
       </div>
+      <p class="auth-lead">Курсы криптовалют и фиата, кросс-курсы, свечи и правила оповещений в одном окне.</p>
+
+      <div class="seg auth-seg">
+        <button type="button" class="seg-btn is-active" data-auth-mode="login">Вход</button>
+        <button type="button" class="seg-btn" data-auth-mode="register">Регистрация</button>
+      </div>
+
+      <div id="auth-error" class="notice notice-error is-hidden"></div>
+
+      <form id="auth-form" novalidate>
+        <label class="field">
+          <span class="field-label">Электронная почта</span>
+          <input type="email" id="auth-email" autocomplete="email" required placeholder="user@example.com">
+        </label>
+        <label class="field">
+          <span class="field-label">Пароль <i>не менее 8 символов</i></span>
+          <input type="password" id="auth-password" autocomplete="current-password" required minlength="8" placeholder="••••••••">
+        </label>
+        <button type="submit" id="auth-submit" class="btn btn-primary btn-block">Войти</button>
+      </form>
     </div>
   </div>
 
-  <div id="app-view" class="app-layout hidden">
-    <aside class="sidebar">
-      <div class="sidebar-header">
-        <h3>Отслеживаемые пары</h3>
-        <button id="logout-btn" class="btn-small">Выйти</button>
+  <!-- ——— приложение ——————————————————————————————————————————— -->
+  <div id="app-view" class="app is-hidden">
+    <header class="topbar">
+      <div class="brand">
+        <img src="./icon.svg" alt="" class="brand-mark" width="32" height="32">
+        <span class="brand-name">Currency<b>Tracker</b></span>
       </div>
 
-      <div id="watchlist-container" class="watchlist-list">
+      <div class="topbar-right">
+        <button id="bell-btn" class="icon-btn tip" type="button" data-tip="Уведомления">
+          <span class="icon-bell"></span>
+          <span id="unread-badge" class="badge is-hidden">0</span>
+        </button>
+        <span id="user-email" class="user-chip"></span>
+        <button id="logout-btn" class="btn btn-ghost" type="button">Выйти</button>
       </div>
+    </header>
 
-      <div class="sidebar-footer">
-        <button id="open-add-dialog-btn" class="btn btn-primary full-width">+ Добавить пару</button>
-      </div>
-    </aside>
-
-    <main class="main-content">
-      <header class="content-header">
-        <div>
-          <h2 id="selected-pair-title">Выберите пару слева</h2>
-          <div id="selected-pair-meta" class="meta-info"></div>
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="sidebar-top">
+          <div class="sidebar-title">
+            <h3>Отслеживаемые пары</h3>
+            <span id="watchlist-count" class="pill">0</span>
+          </div>
+          <input id="watchlist-filter" class="search" type="search" placeholder="Поиск: BTC, RUB…" autocomplete="off">
         </div>
 
-        <div class="header-controls">
-          <div class="mode-switch">
-            <button class="btn-toggle active" data-mode="cross">Кросс-курс</button>
-            <button class="btn-toggle" data-mode="compare">Сравнение динамики</button>
+        <div id="watchlist" class="watchlist"></div>
+
+        <div class="sidebar-bottom">
+          <button id="add-pair-btn" class="btn btn-primary btn-block" type="button">Добавить пару</button>
+        </div>
+      </aside>
+
+      <main class="content">
+        <section class="panel panel-chart">
+          <div class="chart-head">
+            <div class="pair-head">
+              <div class="pair-id">
+                <h2 id="pair-title">Выберите пару</h2>
+                <span id="pair-badges" class="pair-badges"></span>
+              </div>
+              <div class="pair-price">
+                <span id="pair-rate" class="rate">—</span>
+                <span id="pair-change" class="delta"></span>
+              </div>
+              <div id="pair-meta" class="pair-meta">Слева выберите пару или добавьте новую</div>
+            </div>
+
+            <div class="head-controls">
+              <div class="seg" id="mode-switch">
+                <button type="button" class="seg-btn is-active" data-mode="cross">Кросс-курс</button>
+                <button type="button" class="seg-btn" data-mode="compare">Сравнение динамики</button>
+              </div>
+              <div class="seg" id="period-switch">
+                <button type="button" class="seg-btn is-active" data-period="1h">1ч</button>
+                <button type="button" class="seg-btn" data-period="4h">4ч</button>
+                <button type="button" class="seg-btn" data-period="1d">1д</button>
+                <button type="button" class="seg-btn" data-period="1w">1н</button>
+                <button type="button" class="seg-btn seg-rt" data-period="rt"><i class="dot-live"></i>Реальное время</button>
+              </div>
+            </div>
           </div>
 
-          <div class="period-switch">
-            <button class="btn-period active" data-period="1h">1h</button>
-            <button class="btn-period" data-period="4h">4h</button>
-            <button class="btn-period" data-period="1d">1d</button>
-            <button class="btn-period" data-period="1w">1w</button>
-            <button class="btn-period realtime-tab" data-period="rt">🔴 Realtime (15м)</button>
+          <div class="chart-bar">
+            <div id="chart-legend" class="legend"></div>
+            <div class="chart-bar-right">
+              <span id="stream-state" class="stream-state is-hidden"></span>
+              <button id="reset-zoom" class="btn btn-ghost btn-xs is-hidden" type="button">Весь период</button>
+            </div>
           </div>
+
+          <div id="chart-stage" class="chart-stage">
+            <div id="chart-empty" class="chart-empty">Выберите пару в списке слева</div>
+          </div>
+
+          <div class="chart-foot">
+            <span id="chart-meta"></span>
+            <span class="chart-hint">колесо — масштаб · перетаскивание — сдвиг · двойной щелчок — сброс</span>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-title">
+            <h4>Показатели за период</h4>
+            <span id="analytics-note" class="muted"></span>
+          </div>
+          <div id="analytics" class="stats">
+            <small class="muted">Показатели появятся вместе с графиком</small>
+          </div>
+        </section>
+
+        <div class="two-col">
+          <section class="panel">
+            <div class="panel-title">
+              <h4>Правила оповещений</h4>
+              <span id="alerts-count" class="pill">0</span>
+            </div>
+
+            <form id="alert-form" class="alert-form">
+              <label class="field">
+                <span class="field-label">Что отслеживать</span>
+                <select id="alert-target"></select>
+              </label>
+              <label class="field">
+                <span class="field-label">Условие</span>
+                <select id="alert-kind">
+                  <option value="above">Курс выше порога</option>
+                  <option value="below">Курс ниже порога</option>
+                  <option value="growth">Рост более, %</option>
+                  <option value="drop">Падение более, %</option>
+                </select>
+              </label>
+              <label class="field" id="alert-window-field">
+                <span class="field-label">Интервал</span>
+                <select id="alert-window">
+                  <option value="15">за 15 минут</option>
+                  <option value="60" selected>за 1 час</option>
+                  <option value="1440">за сутки</option>
+                </select>
+              </label>
+              <label class="field">
+                <span class="field-label">Значение</span>
+                <input id="alert-value" type="number" step="any" inputmode="decimal" placeholder="0" required>
+              </label>
+              <button type="submit" class="btn btn-primary btn-block">Добавить правило</button>
+            </form>
+
+            <div id="alert-error" class="notice notice-error is-hidden"></div>
+            <div id="alert-hint" class="hint"></div>
+            <div id="alerts-list" class="rows"></div>
+          </section>
+
+          <section class="panel" id="notifications-panel">
+            <div class="panel-title">
+              <h4>Уведомления</h4>
+              <button id="mark-seen-btn" class="btn btn-ghost btn-xs" type="button">Отметить прочитанными</button>
+            </div>
+            <div id="notifications-list" class="rows">
+              <small class="muted">Непрочитанных уведомлений нет</small>
+            </div>
+          </section>
         </div>
-      </header>
-
-      <section class="chart-section">
-        <div id="chart-area" class="chart-box" style="position: relative; width: 100%; height: 100%;">
-          <canvas id="main-chart"></canvas>
-          <div id="chart-empty-state" class="empty-placeholder hidden">Нет данных за выбранный период</div>
-          <div id="realtime-status-banner" class="status-banner hidden"></div>
-        </div>
-        <div id="chart-meta" class="chart-meta"></div>
-      </section>
-
-      <section class="analytics-section">
-        <h4>Показатели пары за период</h4>
-        <div id="analytics-box" class="analytics-grid">
-          <small class="analytics-empty">Показатели появятся вместе с графиком</small>
-        </div>
-      </section>
-
-      <section class="alerts-section">
-        <div class="alerts-header">
-          <h4>Оповещения и правила</h4>
-          <span id="unread-alerts-badge" class="badge">0</span>
-        </div>
-
-        <form id="create-alert-form" class="alerts-form">
-          <select id="alert-target-select"></select>
-          <select id="alert-type-select">
-            <option value="above">Курс выше (&gt;)</option>
-            <option value="below">Курс ниже (&lt;)</option>
-            <option value="growth">Рост более (%) за интервал</option>
-            <option value="drop">Падение более (%) за интервал</option>
-          </select>
-          <select id="alert-interval-select">
-            <option value="15">за 15 мин</option>
-            <option value="60" selected>за 1 час</option>
-            <option value="1440">за сутки</option>
-          </select>
-          <input type="number" id="alert-value-input" step="any" placeholder="Порог или %" required>
-          <button type="submit" class="btn-small btn-primary">+ Добавить правило</button>
-        </form>
-
-        <div id="alert-error" class="alert-error hidden"></div>
-        <div id="alert-hint" class="alert-hint"></div>
-
-        <div id="alerts-list" class="alerts-list"></div>
-      </section>
-
-      <section class="alerts-section">
-        <div class="alerts-header">
-          <h4>Уведомления</h4>
-          <button id="mark-seen-btn" class="btn-small">Отметить прочитанными</button>
-        </div>
-        <div id="notifications-list" class="alerts-list">
-          <small class="muted">Непрочитанных уведомлений нет</small>
-        </div>
-      </section>
-    </main>
+      </main>
+    </div>
   </div>
 
+  <!-- ——— добавление пары —————————————————————————————————————— -->
   <dialog id="add-pair-modal" class="modal">
-    <div class="modal-box">
-      <div class="modal-header">
-        <h3>Добавить валютную пару</h3>
-        <button id="close-add-modal-btn" class="close-btn">&times;</button>
+    <form id="add-pair-form" class="modal-box" method="dialog">
+      <div class="modal-head">
+        <h3>Новая валютная пара</h3>
+        <button type="button" id="modal-close" class="icon-btn icon-x" aria-label="Закрыть"></button>
       </div>
-      <div id="add-pair-error" class="alert-error hidden"></div>
-      <form id="add-pair-form">
-        <div class="form-group">
-          <label for="base-asset-select">Базовый актив (Base):</label>
-          <select id="base-asset-select" required></select>
-        </div>
-        <div class="form-group">
-          <label for="quote-asset-select">Котируемый актив (Quote):</label>
-          <select id="quote-asset-select" required></select>
-        </div>
-        <div class="modal-actions">
-          <button type="button" id="cancel-add-btn" class="btn btn-secondary">Отмена</button>
-          <button type="submit" class="btn btn-primary">Добавить</button>
-        </div>
-      </form>
-    </div>
+
+      <div id="add-pair-error" class="notice notice-error is-hidden"></div>
+
+      <div class="pair-picker">
+        <label class="field">
+          <span class="field-label">Базовый актив</span>
+          <select id="base-asset" required></select>
+        </label>
+        <button type="button" id="swap-assets" class="icon-btn swap tip" data-tip="Поменять местами" aria-label="Поменять местами">
+          <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor"
+               stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M2.5 5.5h11M10.5 2.5l3 3M13.5 10.5h-11M5.5 13.5l-3-3"/>
+          </svg>
+        </button>
+        <label class="field">
+          <span class="field-label">Котируемый актив</span>
+          <select id="quote-asset" required></select>
+        </label>
+      </div>
+
+      <div class="pair-preview">
+        <span id="pair-preview-text">BTC / USDT</span>
+      </div>
+
+      <p class="hint">Курс пары считается как отношение котировок сторон. У фиатных валют котировка обновляется раз в сутки, поэтому короткие периоды для пары из двух фиатов недоступны.</p>
+
+      <div class="modal-actions">
+        <button type="button" id="modal-cancel" class="btn btn-ghost">Отмена</button>
+        <button type="submit" class="btn btn-primary">Добавить пару</button>
+      </div>
+    </form>
   </dialog>
 
   <script type="module" src="./main.js"></script>
