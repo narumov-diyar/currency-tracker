@@ -27,4 +27,17 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-"${compose[@]}" up --build --abort-on-container-exit --exit-code-from server-tests server-tests
+"${compose[@]}" build server-tests collector-tests web-tests
+"${compose[@]}" up --detach --wait --wait-timeout 120 test-db
+
+result=0
+for service in server-tests collector-tests web-tests; do
+    printf '\n=== %s ===\n' "$service"
+    if "${compose[@]}" run --rm --no-deps "$service"; then
+        printf 'Результат %s: успешно\n' "$service"
+    else
+        printf 'Результат %s: ошибка\n' "$service" >&2
+        result=1
+    fi
+done
+exit "$result"

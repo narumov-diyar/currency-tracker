@@ -50,5 +50,45 @@ services:
         condition: service_healthy
     restart: "no"
 
+  collector:
+    build:
+      context: .
+      dockerfile: Dockerfile.collector
+      target: runtime
+    environment:
+      DATABASE_URL: postgres://tracker@db:5432/tracker?sslmode=disable
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Укажите POSTGRES_PASSWORD в .env}
+      COLLECTOR_HTTP_TIMEOUT: ${COLLECTOR_HTTP_TIMEOUT:-10}
+      COLLECTOR_RETRY_ATTEMPTS: ${COLLECTOR_RETRY_ATTEMPTS:-4}
+      COLLECTOR_BREAKER_THRESHOLD: ${COLLECTOR_BREAKER_THRESHOLD:-3}
+      COLLECTOR_BREAKER_OPEN_INTERVAL: ${COLLECTOR_BREAKER_OPEN_INTERVAL:-300}
+      COLLECTOR_FIAT_RETRY_INTERVAL: ${COLLECTOR_FIAT_RETRY_INTERVAL:-600}
+      COLLECTOR_DB_POOL_SIZE: ${COLLECTOR_DB_POOL_SIZE:-5}
+      COLLECTOR_LOG_LEVEL: ${COLLECTOR_LOG_LEVEL:-INFO}
+    depends_on:
+      api:
+        condition: service_healthy
+    stop_grace_period: 2m
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      target: runtime
+    environment:
+      API_URL: http://api:8080
+    ports:
+      - "127.0.0.1:${WEB_PORT:-3000}:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
 volumes:
   postgres-data:

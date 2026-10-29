@@ -1,0 +1,16 @@
+FROM python:3.11-slim AS dependencies
+WORKDIR /app
+COPY collector/requirements.txt collector/requirements-dev.txt ./collector/
+
+FROM dependencies AS test
+RUN pip install --no-cache-dir -r collector/requirements-dev.txt
+COPY collector ./collector
+COPY internal/storage/migrations ./internal/storage/migrations
+CMD ["python", "-m", "pytest", "collector"]
+
+FROM dependencies AS runtime
+RUN pip install --no-cache-dir -r collector/requirements.txt \
+    && useradd --system --uid 10001 --no-create-home collector
+COPY collector ./collector
+USER collector
+CMD ["python", "-m", "collector"]
