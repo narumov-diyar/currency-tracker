@@ -11,3 +11,8 @@ Dockerfile
 *.test
 *.out
 test-results
+**/node_modules
+**/__pycache__
+**/.pytest_cache
+**/.venv
+**/dist

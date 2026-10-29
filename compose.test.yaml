@@ -26,3 +26,22 @@ services:
     depends_on:
       test-db:
         condition: service_healthy
+
+  collector-tests:
+    profiles: [test]
+    build:
+      context: .
+      dockerfile: Dockerfile.collector
+      target: test
+    environment:
+      TEST_DATABASE_URL: postgres://tracker_test:test-only-password@test-db:5432/tracker_test?sslmode=disable
+    depends_on:
+      test-db:
+        condition: service_healthy
+
+  web-tests:
+    profiles: [test]
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      target: test

@@ -14,7 +14,7 @@ compose+=(-f compose.yaml)
 
 case "${1:-up}" in
     up)
-        "${compose[@]}" up --build --detach --wait --wait-timeout 120 api
+        "${compose[@]}" up --build --detach --wait --wait-timeout 120
         ;;
     seed)
         shift
@@ -26,7 +26,7 @@ case "${1:-up}" in
         "${compose[@]}" down
         ;;
     logs)
-        "${compose[@]}" logs --follow api db
+        "${compose[@]}" logs --follow api db collector web
         ;;
     *)
         echo 'Использование: bash scripts/dev.sh {up|seed [-days=3]|down|logs}' >&2

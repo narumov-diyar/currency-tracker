@@ -177,3 +177,32 @@ jobs:
 
       - name: Сборка
         run: npm run build
+
+  compose:
+    name: Docker Compose
+    runs-on: ubuntu-latest
+    env:
+      POSTGRES_PASSWORD: ci-compose-password
+      AUTH_SECRET: ci-compose-secret-key-not-shorter-than-32-characters
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Запуск компонентов
+        run: bash scripts/dev.sh up
+
+      - name: Проверка веб-клиента и API
+        run: |
+          curl -fsS http://127.0.0.1:3000/ > /dev/null
+          count=$(curl -fsS http://127.0.0.1:3000/api/assets | grep -o '"symbol"' | wc -l)
+          test "$count" -eq 40
+          docker compose ps --status running --services | grep -qx collector
+
+      - name: Тесты в контейнерах
+        run: bash scripts/test.sh
+
+      - name: Журналы и очистка
+        if: always()
+        run: |
+          docker compose logs --no-color
+          docker compose down --volumes
