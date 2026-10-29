@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   parseHistory,
   parseStreamMessage,
+  aggregateCandles,
   crossRate,
   buildAlertPayload,
   describeAlert,
@@ -45,8 +46,16 @@ describe('parseHistory', () => {
       h: 76400,
       l: 76200,
       c: 76350.42,
+      v: 12.5,
     });
     expect(analytics.change_diff).toBe(0.23);
+  });
+
+  // У фиатной стороны объёма нет, сервер присылает null. Числом он нужен
+  // в подсказке графика, где складывается по свечам интервала.
+  it('считает отсутствующий объём нулём', () => {
+    const { series } = parseHistory(compareResponse, 'compare');
+    expect(series[1].points[0].v).toBe(0);
   });
 
   it('читает один рассчитанный ряд в режиме кросс-курса', () => {
@@ -100,6 +109,52 @@ describe('parseStreamMessage', () => {
   });
 });
 
+describe('aggregateCandles', () => {
+  it('собирает свечу из точек интервала', () => {
+    const points = [
+      { t: 0, c: 10 },
+      { t: 20e3, c: 14 },
+      { t: 40e3, c: 9 },
+      { t: 60e3, c: 11 },
+    ];
+
+    const candles = aggregateCandles(points, 60e3);
+
+    expect(candles).toHaveLength(2);
+    expect(candles[0]).toEqual({ t: 0, w: 60e3, o: 10, h: 14, l: 9, c: 9, v: 0, n: 3 });
+    expect(candles[1].t).toBe(60e3);
+    expect(candles[1].n).toBe(1);
+  });
+
+  // Максимум и минимум готовой свечи шире её цен открытия и закрытия,
+  // поэтому при укрупнении берутся именно они, а не только закрытия.
+  it('сохраняет края готовых свечей при укрупнении', () => {
+    const points = [
+      { t: 0, o: 10, h: 18, l: 8, c: 12, v: 2 },
+      { t: 60e3, o: 12, h: 13, l: 4, c: 5, v: 3 },
+    ];
+
+    const candles = aggregateCandles(points, 300e3);
+
+    expect(candles).toHaveLength(1);
+    expect(candles[0]).toMatchObject({ o: 10, h: 18, l: 4, c: 5, v: 5, n: 2 });
+  });
+
+  // Суточная фиатная свеча одна на интервал: размножать её по минутам
+  // криптовалюты значило бы выдумать котировки, которых не было.
+  it('оставляет одиночную суточную точку одной свечой', () => {
+    const candles = aggregateCandles([{ t: 86400e3, o: 1, h: 1, l: 1, c: 1 }], 86400e3);
+
+    expect(candles).toHaveLength(1);
+    expect(candles[0].w).toBe(86400e3);
+  });
+
+  it('не падает на пустом ряде и нулевом шаге', () => {
+    expect(aggregateCandles([], 60e3)).toEqual([]);
+    expect(aggregateCandles([{ t: 0, c: 1 }], 0)).toEqual([]);
+  });
+});
+
 describe('crossRate', () => {
   it('делит цены сторон', () => {
     expect(crossRate({ BTC: 76400, RUB: 0.0119 }, 'BTC', 'RUB')).toBeCloseTo(6420168, 0);
@@ -108,6 +163,17 @@ describe('crossRate', () => {
   // У фиатной стороны потокового режима нет, сервер её не присылает.
   it('отдаёт цену базового актива, если котируемый не передаётся', () => {
     expect(crossRate({ BTC: 76400 }, 'BTC', 'RUB')).toBe(76400);
+  });
+
+  // Последняя известная цена фиата действует до следующих суток, поэтому
+  // курс пары по ней считается так же, как его считает сервер.
+  it('подставляет последнюю известную цену котируемой стороны', () => {
+    expect(crossRate({ BTC: 76400 }, 'BTC', 'RUB', 0.0119)).toBeCloseTo(6420168, 0);
+  });
+
+  // Живая котировка главнее перенесённой.
+  it('предпочитает котировку потока перенесённой', () => {
+    expect(crossRate({ BTC: 76400, RUB: 0.0119 }, 'BTC', 'RUB', 0.5)).toBeCloseTo(6420168, 0);
   });
 
   it('молчит, пока не пришла первая котировка базового актива', () => {

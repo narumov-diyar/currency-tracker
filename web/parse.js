@@ -22,6 +22,7 @@ export function parseHistory(res, mode) {
       series.push({
         symbol: cross.pair,
         resolution: cross.resolution,
+        ohlc: false,
         points: (cross.points || []).map(([t, rate]) => ({ t, c: Number(rate) })),
       });
     }
@@ -31,12 +32,14 @@ export function parseHistory(res, mode) {
       series.push({
         symbol: side.symbol,
         resolution: side.resolution,
-        points: (side.candles || []).map(([t, o, h, l, c]) => ({
+        ohlc: true,
+        points: (side.candles || []).map(([t, o, h, l, c, v]) => ({
           t,
           o: Number(o),
           h: Number(h),
           l: Number(l),
           c: Number(c),
+          v: v === null || v === undefined ? 0 : Number(v),
         })),
       });
     }
@@ -79,16 +82,56 @@ export function parseStreamMessage(raw) {
 
 // Курс пары — отношение цен сторон. Котируемая сторона может не иметь
 // потокового режима: у фиатной валюты котировок внутри суток нет, и сервер
-// её просто не присылает. Тогда ряд показывает цену базового актива в USDT,
-// и подпись должна об этом говорить.
-export function crossRate(latest, baseSymbol, quoteSymbol) {
+// её просто не присылает. Тогда берётся её последняя известная цена —
+// тем же переносом, каким сервер считает кросс-курс. Если неизвестна и она,
+// ряд показывает цену базового актива в USDT, и подпись говорит об этом.
+export function crossRate(latest, baseSymbol, quoteSymbol, carried) {
   const base = latest[baseSymbol];
   if (base === undefined) return null;
 
-  const quote = latest[quoteSymbol];
-  if (quote === undefined) return base;
+  const quote = latest[quoteSymbol] ?? carried;
+  if (quote === undefined || quote === null) return base;
   if (!quote) return null;
   return base / quote;
+}
+
+// Свеча из нескольких точек ряда: открытие — первая цена интервала, максимум
+// и минимум — крайние значения внутри него, закрытие — последняя цена.
+//
+// Нужна в двух случаях. Кросс-курс приходит одним числом на точку, и свечу
+// у него можно получить только так — сгруппировав соседние точки. А при
+// отдалении графика укрупнение свечей обязательно: на недельном окне
+// минутные свечи слились бы в сплошную стену по пикселю шириной.
+//
+// Шаг мельче собственного шага ряда смысла не имеет: между его точками
+// данных нет. Суточная фиатная свеча поэтому и остаётся одной свечой на
+// сутки — она растягивается на свой интервал, а не размножается по минутам
+// криптовалюты, что выдумало бы несуществующие котировки.
+export function aggregateCandles(points, stepMs, offset = 0) {
+  if (!points || points.length === 0 || !(stepMs > 0)) return [];
+
+  const out = [];
+  let cur = null;
+
+  for (const p of points) {
+    const bucket = Math.floor((p.t + offset) / stepMs) * stepMs - offset;
+    const high = p.h ?? p.c;
+    const low = p.l ?? p.c;
+
+    if (!cur || cur.t !== bucket) {
+      cur = { t: bucket, w: stepMs, o: p.o ?? p.c, h: high, l: low, c: p.c, v: p.v || 0, n: 1 };
+      out.push(cur);
+      continue;
+    }
+
+    if (high > cur.h) cur.h = high;
+    if (low < cur.l) cur.l = low;
+    cur.c = p.c;
+    cur.v += p.v || 0;
+    cur.n += 1;
+  }
+
+  return out;
 }
 
 const KINDS = {
