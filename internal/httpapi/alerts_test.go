@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -20,6 +21,7 @@ type stubAlerts struct {
 	owners  map[int64]int64
 	created []storage.NewAlertRule
 	nextID  int64
+	updates []storage.AlertUpdate
 }
 
 func newStubAlerts() *stubAlerts {
@@ -53,6 +55,7 @@ func (s *stubAlerts) Create(_ context.Context, rule storage.NewAlertRule) (stora
 }
 
 func (s *stubAlerts) Update(_ context.Context, userID, ruleID int64, update storage.AlertUpdate) (storage.AlertRule, error) {
+	s.updates = append(s.updates, update)
 	if owner, ok := s.owners[ruleID]; !ok || owner != userID {
 		return storage.AlertRule{}, storage.ErrAlertNotFound
 	}
@@ -298,5 +301,64 @@ func TestAlertsOfAnotherUserAreHidden(t *testing.T) {
 	}
 	if len(rules) != 0 {
 		t.Errorf("another user sees %d rules, want none", len(rules))
+	}
+}
+
+func TestAlertTargetValueBounds(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		valid bool
+	}{
+		{"NaN", false}, {"Inf", false}, {"-Inf", false}, {"0", false}, {"-1", false},
+		{"abc", false}, {"0.000000001", false}, {"10000000000", false},
+		{"1e10", false}, {"1_000", false}, {"0x1p0", false},
+		{"0.00000001", true}, {"9999999999.99999999", true}, {"1e-8", true},
+	} {
+		for _, method := range []string{http.MethodPost, http.MethodPatch} {
+			t.Run(method+"/"+tc.value, func(t *testing.T) {
+				e := newAlertEnv(t)
+				path := "/api/alerts"
+				body := fmt.Sprintf(`{"target_type":"asset","symbol":"BTC","condition_type":"threshold","direction":"above","target_value":%q}`, tc.value)
+				want := http.StatusBadRequest
+				if method == http.MethodPatch {
+					e.alerts.owners[1] = 1
+					path += "/1"
+					body = fmt.Sprintf(`{"target_value":%q}`, tc.value)
+				}
+				if tc.valid {
+					want = http.StatusCreated
+					if method == http.MethodPatch {
+						want = http.StatusOK
+					}
+				}
+				rec := e.do(t, method, path, body, e.token)
+				calls := len(e.alerts.created) + len(e.alerts.updates)
+				if rec.Code != want || calls != map[bool]int{true: 1, false: 0}[tc.valid] {
+					t.Errorf("status=%d, calls=%d, want status=%d for valid=%t", rec.Code, calls, want, tc.valid)
+				}
+			})
+		}
+	}
+}
+
+func TestAlertPatchNormalizesDirectionAndValidatesWindow(t *testing.T) {
+	for _, tc := range []struct{ body, direction string }{
+		{`{"direction":"ABOVE"}`, "above"}, {`{"direction":" below "}`, "below"},
+		{`{"direction":"sideways"}`, ""}, {`{"window_minutes":0}`, ""}, {`{"window_minutes":-1}`, ""},
+	} {
+		t.Run(tc.body, func(t *testing.T) {
+			e := newAlertEnv(t)
+			e.alerts.owners[1] = 1
+			rec := e.do(t, http.MethodPatch, "/api/alerts/1", tc.body, e.token)
+			if tc.direction == "" {
+				if rec.Code != http.StatusBadRequest || len(e.alerts.updates) != 0 {
+					t.Errorf("invalid patch: status=%d, updates=%v", rec.Code, e.alerts.updates)
+				}
+				return
+			}
+			if rec.Code != http.StatusOK || len(e.alerts.updates) != 1 || *e.alerts.updates[0].Direction != tc.direction {
+				t.Errorf("status=%d, updates=%v, want direction %q", rec.Code, e.alerts.updates, tc.direction)
+			}
+		})
 	}
 }
