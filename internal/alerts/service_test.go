@@ -170,3 +170,65 @@ func TestUnknownConditionDoesNotFire(t *testing.T) {
 		t.Errorf("сработало %d правил, ожидалось 0", fired)
 	}
 }
+
+type errorStore struct {
+	stubStore
+	assetError, pairError error
+	calls                 [][2]int64
+}
+
+func (s *errorStore) PendingForAsset(context.Context, int) ([]storage.PendingRule, error) {
+	return s.onAsset, s.assetError
+}
+
+func (s *errorStore) PendingForPairsWith(context.Context, int) ([]storage.PendingRule, error) {
+	return s.onPairs, s.pairError
+}
+
+func (s *errorStore) Trigger(_ context.Context, ruleID, userID int64) (bool, error) {
+	s.calls = append(s.calls, [2]int64{ruleID, userID})
+	if len(s.calls) == 2 {
+		return false, errStoreFailure
+	}
+	return true, nil
+}
+
+var errStoreFailure = errors.New("store failure")
+
+func TestCheckAssetReportsQueryErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		assetErr, pairErr error
+	}{
+		{"asset", errStoreFailure, nil},
+		{"pair", nil, errStoreFailure},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &errorStore{assetError: tc.assetErr, pairError: tc.pairErr}
+			got, err := newService(store).CheckAsset(context.Background(), 1)
+			if !errors.Is(err, errStoreFailure) || got != 0 || len(store.calls) != 0 {
+				t.Fatalf("fired=%d, error=%v, calls=%v", got, err, store.calls)
+			}
+		})
+	}
+}
+
+func TestCheckAssetReturnsPartialResult(t *testing.T) {
+	matching := func(id, owner int64) storage.PendingRule {
+		return storage.PendingRule{ID: id, UserID: owner, ConditionType: storage.ConditionThreshold,
+			Direction: DirectionAbove, TargetValue: 10, Previous: ptr(9), Current: 10}
+	}
+	skipped := matching(1, 11)
+	skipped.Current = 9
+	store := &errorStore{stubStore: stubStore{
+		onAsset: []storage.PendingRule{skipped, matching(2, 22)},
+		onPairs: []storage.PendingRule{matching(3, 33), matching(4, 44)},
+	}}
+	got, err := newService(store).CheckAsset(context.Background(), 1)
+	if !errors.Is(err, errStoreFailure) || got != 1 {
+		t.Fatalf("fired=%d, error=%v", got, err)
+	}
+	if len(store.calls) != 2 || store.calls[0] != [2]int64{2, 22} || store.calls[1] != [2]int64{3, 33} {
+		t.Fatalf("unexpected rule/owner calls: %v", store.calls)
+	}
+}
