@@ -200,3 +200,50 @@ func TestDeletePairKeepsCandles(t *testing.T) {
 		t.Errorf("candles = %d, want them untouched after removing a pair", candles)
 	}
 }
+
+func TestPairFreshnessUsesEachAssetsInterval(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	if _, err := Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	for _, tc := range []struct {
+		name, base, quote string
+		baseAge, quoteAge time.Duration
+		stale             bool
+	}{
+		{"crypto fresh", "BTC", "USDT", time.Minute, time.Minute, false},
+		{"crypto stale", "BTC", "USDT", time.Minute, 3 * time.Minute, true},
+		{"fiat fresh", "EUR", "RUB", 25 * time.Hour, 25 * time.Hour, false},
+		{"fiat stale", "EUR", "RUB", 25 * time.Hour, 49 * time.Hour, true},
+		{"mixed fresh", "BTC", "RUB", time.Minute, 25 * time.Hour, false},
+		{"mixed stale", "BTC", "RUB", 3 * time.Minute, 25 * time.Hour, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := pool.Exec(ctx, "DELETE FROM price_candles"); err != nil {
+				t.Fatal(err)
+			}
+			base, quote := assetID(t, pool, tc.base), assetID(t, pool, tc.quote)
+			for _, side := range []struct {
+				symbol string
+				id     int
+				age    time.Duration
+			}{{tc.base, base, tc.baseAge}, {tc.quote, quote, tc.quoteAge}} {
+				resolution := 1
+				if side.symbol == "EUR" || side.symbol == "RUB" {
+					resolution = 1440
+				}
+				insertCandle(t, pool, side.id, resolution, now.Add(-side.age), "10")
+			}
+			user := seedUser(t, pool, tc.name+"@example.com")
+			if _, err := pool.Exec(ctx, "INSERT INTO user_pairs (user_id,base_asset_id,quote_asset_id) VALUES ($1,$2,$3)", user, base, quote); err != nil {
+				t.Fatal(err)
+			}
+			pairs, err := NewPairs(pool).List(ctx, user)
+			if err != nil || len(pairs) != 1 || pairs[0].Rate == nil || pairs[0].Stale != tc.stale {
+				t.Fatalf("pair=%+v err=%v, want a rate and stale=%t", pairs, err, tc.stale)
+			}
+		})
+	}
+}
