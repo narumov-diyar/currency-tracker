@@ -21,7 +21,7 @@ func requireValue(t *testing.T, got *float64, want, tolerance float64, name stri
 	if got == nil {
 		t.Fatalf("%s is empty, want %v", name, want)
 	}
-	if math.Abs(*got-want) > tolerance {
+	if math.IsNaN(*got) || math.IsInf(*got, 0) || math.Abs(*got-want) > tolerance {
 		t.Errorf("%s = %v, want %v", name, *got, want)
 	}
 }
@@ -56,11 +56,10 @@ func TestVolatility(t *testing.T) {
 	steady := Analyse(series(100, 110, 121, 133.1, 146.41), series(1, 1, 1, 1, 1))
 	requireValue(t, steady.BaseVol, 0, 1e-9, "волатильность ровного роста")
 
-	// Скачки в разные стороны дают заметный разброс.
+	// Доходности +1/2, -1/3, +1/2, -1/3. Отклонение от
+	// среднего ±5/12, выборочная дисперсия 4*(5/12)^2/3.
 	jumpy := Analyse(series(100, 150, 100, 150, 100), series(1, 1, 1, 1, 1))
-	if jumpy.BaseVol == nil || *jumpy.BaseVol < 10 {
-		t.Errorf("волатильность скачущего ряда = %v, ожидалась заметная", jumpy.BaseVol)
-	}
+	requireValue(t, jumpy.BaseVol, 100*5/(6*math.Sqrt(3)), 1e-9, "волатильность скачущего ряда")
 }
 
 func TestInsufficientData(t *testing.T) {
@@ -72,6 +71,7 @@ func TestInsufficientData(t *testing.T) {
 		{name: "пустые ряды"},
 		{name: "одна точка", base: series(100), quote: series(100)},
 		{name: "две точки", base: series(100, 110), quote: series(100, 120)},
+		{name: "три точки", base: series(100, 110, 99), quote: series(100, 110, 110)},
 	}
 
 	for _, tt := range tests {
@@ -80,6 +80,9 @@ func TestInsufficientData(t *testing.T) {
 
 			if a.Correlation != nil {
 				t.Errorf("корреляция = %v, ожидалась пустой", *a.Correlation)
+			}
+			if a.QuoteVol != nil {
+				t.Errorf("волатильность котируемого ряда = %v, ожидалась пустой", *a.QuoteVol)
 			}
 			if a.BaseVol != nil {
 				t.Errorf("волатильность = %v, ожидалась пустой", *a.BaseVol)
@@ -145,4 +148,25 @@ func TestZeroPriceDoesNotBreakCalculations(t *testing.T) {
 	if a.QuoteChange == nil {
 		t.Error("изменение котируемого актива должно считаться")
 	}
+}
+
+func TestAnalyticsExactValues(t *testing.T) {
+	base := series(100, 110, 99, 99)
+	quote := series(100, 110, 110, 99)
+	a := Analyse(base, quote)
+	requireValue(t, a.BaseChange, -1, 1e-9, "изменение базы")
+	requireValue(t, a.QuoteChange, -1, 1e-9, "изменение котировки")
+	requireValue(t, a.ChangeDiff, 0, 1e-9, "разность")
+	requireValue(t, a.Correlation, 0.5, 1e-9, "корреляция")
+	requireValue(t, a.BaseVol, 10, 1e-9, "волатильность базы")
+	requireValue(t, a.QuoteVol, 10, 1e-9, "волатильность котировки")
+
+	// Лишние цены лежат между общими моментами и не входят в доходности.
+	for i := range base {
+		base[i].Time = base[i].Time.Add(time.Duration(i) * time.Minute)
+		quote[i].Time = base[i].Time
+	}
+	extra := Point{Time: base[0].Time.Add(time.Minute), Close: 500}
+	baseWithExtra := append([]Point{base[0], extra}, base[1:]...)
+	requireValue(t, Analyse(baseWithExtra, quote).Correlation, 0.5, 1e-9, "корреляция по общим моментам")
 }
