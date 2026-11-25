@@ -5,11 +5,11 @@ import {
   trimZeros,
   parseHistory,
   parseStreamMessage,
-  crossRate,
   buildAlertPayload,
   describeAlert,
   errorText,
 } from './parse.js';
+import { mergeStreamTicks, rebuildStreamSeries, RT_WINDOW_MS } from './stream.js';
 
 const el = (id) => document.getElementById(id);
 const toaster = createToaster();
@@ -23,7 +23,6 @@ enhanceSearch(el('watchlist-filter'));
 const COLORS = { cross: '#2de2a4', base: '#38bdf8', quote: '#f0b429', rt: '#2de2a4' };
 const PERIOD_LABEL = { '1h': 'за час', '4h': 'за 4 часа', '1d': 'за сутки', '1w': 'за неделю', rt: 'за 15 минут' };
 const RESOLUTION_NAME = { 1: '1 минута', 5: '5 минут', 60: '1 час', 1440: '1 сутки' };
-const RT_WINDOW_MS = 15 * 60e3;
 
 const state = {
   token: localStorage.getItem('token'),
@@ -711,22 +710,17 @@ function plain(value, digits) {
 // ——— поток реального времени ————————————————————————————————————
 
 let socket = null;
-let streamLatest = {};
-let streamSnapshots = {};
-// Сохранённые минутные точки за прошедшие 15 минут и последняя известная
-// цена котируемой стороны: буфер сервера наполняется, только пока пару
-// кто-то смотрит, поэтому на момент подключения прошлого в нём нет.
+let streamQuotes = {};
 let streamSeed = [];
-let streamCarried = null;
+let streamCarried = {};
 let streamBaseOnly = false;
 let streamRun = 0;
 
 async function startStream() {
   stopStream();
-  streamLatest = {};
-  streamSnapshots = {};
+  streamQuotes = {};
   streamSeed = [];
-  streamCarried = null;
+  streamCarried = {};
   streamBaseOnly = false;
 
   const run = ++streamRun;
@@ -738,17 +732,16 @@ async function startStream() {
   setStreamState('Загрузка окна…', '');
   showChartEmpty('Загрузка последних 15 минут…');
 
-  await loadStreamSeed(pair);
+  const seed = await loadStreamSeed(pair);
   if (run !== streamRun) return;
 
-  if (streamSeed.length > 0) setStreamSeries(pair, []);
+  streamSeed = seed.points;
+  streamCarried = seed.carried;
+  updateStreamChart(pair, Date.now());
   openStreamSocket(pair, run);
 }
 
-// Сохранённые котировки за окно: кросс-курс даёт готовый ряд пары, а
-// суточный запрос — последнюю цену котируемой стороны в USDT. Она нужна,
-// чтобы перевести поток базового актива в курс пары: у фиата котировок
-// внутри суток нет, и сервер считает кросс-курс тем же переносом.
+// Недельное сравнение даёт последнюю известную цену каждой стороны.
 async function loadStreamSeed(pair) {
   const query = (period, mode) => new URLSearchParams({
     base: pair.base.symbol,
@@ -756,26 +749,18 @@ async function loadStreamSeed(pair) {
     period,
     mode,
   });
+  const [cross, sides] = await Promise.allSettled([
+    api(`/history?${query('1h', 'cross')}`),
+    api(`/history?${query('1w', 'compare')}`),
+  ]);
 
-  try {
-    // Недельное окно, а не суточное: свеча фиата приходится на полночь UTC
-    // и под конец суток уже не попадает в последние 24 часа.
-    const [crossRes, sidesRes] = await Promise.all([
-      api(`/history?${query('1h', 'cross')}`),
-      api(`/history?${query('1w', 'compare')}`),
-    ]);
-
-    const edge = Date.now() - RT_WINDOW_MS;
-    const cross = parseHistory(crossRes, 'cross').series[0];
-    streamSeed = (cross ? cross.points : []).filter((p) => p.t >= edge);
-
-    const quoteSide = parseHistory(sidesRes, 'compare').series.find((s) => s.symbol === pair.quote.symbol);
-    if (quoteSide && quoteSide.points.length > 0) {
-      streamCarried = quoteSide.points[quoteSide.points.length - 1].c;
-    }
-  } catch (err) {
-    console.warn('История для потока недоступна:', err);
+  const points = parseHistory(cross.value, 'cross').series[0]?.points ?? [];
+  const carried = {};
+  for (const side of parseHistory(sides.value, 'compare').series) {
+    const last = side.points.at(-1);
+    if (last) carried[side.symbol] = last.c;
   }
+  return { points, carried };
 }
 
 function openStreamSocket(pair, run) {
@@ -798,43 +783,16 @@ function openStreamSocket(pair, run) {
     if (run !== streamRun || !samePair(pair)) return;
     const msg = parseStreamMessage(event.data);
 
+    const now = Date.now();
     if (msg.type === 'snapshot') {
-      // Буфер сервера хранит последние 900 значений, а не последние
-      // 15 минут: если пару уже смотрели раньше, в снимок попадают
-      // котировки того сеанса. По времени их надо отрезать.
-      const edge = Date.now() - RT_WINDOW_MS;
-      streamSnapshots[msg.symbol] = msg.points.filter((p) => p.t >= edge);
-      if (msg.points.length) streamLatest[msg.symbol] = msg.points[msg.points.length - 1].v;
-      rebuildStreamSeries(pair);
+      streamQuotes = mergeStreamTicks(streamQuotes,
+        msg.points.map((point) => ({ ...point, symbol: msg.symbol })), now);
+    } else if (msg.type === 'tick') {
+      streamQuotes = mergeStreamTicks(streamQuotes, msg.ticks, now);
+    } else {
       return;
     }
-    if (msg.type !== 'tick') return;
-
-    let at = 0;
-    for (const tick of msg.ticks) {
-      streamLatest[tick.symbol] = tick.v;
-      if (tick.t > at) at = tick.t;
-    }
-
-    // Котировки котируемой стороны могут пойти позже базовых: тогда ряд
-    // надо пересобрать, иначе он так и останется ценой базы в USDT.
-    if (streamBaseOnly && streamLatest[pair.quote.symbol] !== undefined) {
-      rebuildStreamSeries(pair);
-      return;
-    }
-
-    const value = crossRate(streamLatest, pair.base.symbol, pair.quote.symbol, streamCarried);
-    if (value === null) return;
-
-    const point = { t: at || Date.now(), c: value };
-    if (state.series.length === 0 || state.series[0].id !== 'rt') {
-      setStreamSeries(pair, [point]);
-      return;
-    }
-
-    ensurePlot().appendPoint('rt', point, RT_WINDOW_MS);
-    el('pair-rate').textContent = formatRate(value);
-    updateLegendValues(null);
+    updateStreamChart(pair, now);
   };
 
   socket.onerror = () => streamFallback(pair);
@@ -854,71 +812,21 @@ function stopStream() {
   setStreamState('');
 }
 
-// Снимок приходит отдельным сообщением на каждую сторону. Курс пары — это
-// отношение цен, причём котируемая сторона берётся последней известной на
-// момент точки: так же, как её переносит сервер при расчёте кросс-курса.
-function rebuildStreamSeries(pair) {
-  const basePoints = streamSnapshots[pair.base.symbol] || [];
-  if (basePoints.length === 0) return;
-
-  const quotePoints = streamSnapshots[pair.quote.symbol] || [];
-  streamBaseOnly = quotePoints.length === 0 && streamCarried === null;
-
-  let index = 0;
-  let carried = streamCarried;
-  const live = [];
-
-  for (const point of basePoints) {
-    while (index < quotePoints.length && quotePoints[index].t <= point.t) {
-      carried = quotePoints[index].v;
-      index += 1;
-    }
-    if (streamBaseOnly) live.push({ t: point.t, c: point.v });
-    else if (carried) live.push({ t: point.t, c: point.v / carried });
-  }
-
-  setStreamSeries(pair, live);
-}
-
-// Пропуск в потоке, который имеет смысл закрывать сохранённой свечой.
-const STREAM_GAP_MS = 30e3;
-
-// Ряд склеивается из сохранённых минутных свечей и котировок потока.
-//
-// Подписку на биржу сборщик держит, только пока пару кто-то смотрит, и за
-// время без зрителей в буфере сервера остаётся разрыв: буфер хранит
-// последние 900 значений, а не последние 15 минут, поэтому они могут быть
-// растянуты на час с лишним. Минутные свечи при этом пишутся непрерывно,
-// ими разрывы и закрываются — иначе несколько минут без котировок
-// рисуются одной прямой чертой.
-function streamPoints(live) {
-  if (streamBaseOnly) return live;
-
-  const edge = Date.now() - RT_WINDOW_MS;
-  const stream = live.filter((p) => p.t >= edge);
-  const stored = streamSeed.filter((p) => p.t >= edge);
-  if (stream.length === 0) return stored;
-
-  const filler = [];
-  let i = 0;
-  for (const point of stored) {
-    while (i + 1 < stream.length && stream[i + 1].t <= point.t) i += 1;
-    const before = stream[i].t <= point.t ? stream[i] : null;
-    const after = stream[i].t > point.t ? stream[i] : stream[i + 1];
-    const distance = Math.min(
-      before ? point.t - before.t : Infinity,
-      after ? after.t - point.t : Infinity,
-    );
-    if (distance > STREAM_GAP_MS) filler.push(point);
-  }
-
-  return filler.length === 0 ? stream : filler.concat(stream).sort((a, b) => a.t - b.t);
-}
-
-function setStreamSeries(pair, live) {
-  const points = streamPoints(live);
+function updateStreamChart(pair, now) {
+  const { points, baseOnly, liveCount } = rebuildStreamSeries({
+    baseSymbol: pair.base.symbol,
+    quoteSymbol: pair.quote.symbol,
+    history: streamSeed,
+    quotes: streamQuotes,
+    carried: streamCarried,
+    now,
+  });
+  streamBaseOnly = baseOnly;
   if (points.length === 0) return;
+  setStreamSeries(pair, points, liveCount);
+}
 
+function setStreamSeries(pair, points, liveCount = 0) {
   const label = streamBaseOnly ? `${pair.base.symbol} в USDT` : `${pair.base.symbol}/${pair.quote.symbol}`;
   const series = [{
     id: 'rt',
@@ -935,9 +843,9 @@ function setStreamSeries(pair, live) {
 
   const chart = ensurePlot();
   chart.setMode('absolute');
-  chart.setSeries(series);
+  chart.setSeries(series, { keepView: chart.isZoomed(), animate: false });
   renderLegend(series);
-  setChartMeta(streamMeta(pair, live.length));
+  setChartMeta(streamMeta(pair, liveCount));
 
   const last = points[points.length - 1];
   el('pair-rate').textContent = formatRate(last.c);
@@ -953,8 +861,10 @@ function streamMeta(pair, liveCount) {
   parts.push(liveCount > 0
     ? 'поток по секундам, перерывы закрыты сохранёнными свечами'
     : 'сохранённые свечи · ожидание первых котировок потока');
-  if (streamLatest[pair.quote.symbol] === undefined && streamCarried !== null) {
-    parts.push(`курс ${pair.quote.symbol} взят последним известным — он обновляется раз в сутки`);
+  for (const side of [pair.base, pair.quote]) {
+    if (!streamQuotes[side.symbol]?.length && streamCarried[side.symbol] !== undefined) {
+      parts.push(`используется последняя сохранённая цена ${side.symbol}`);
+    }
   }
   return parts.join(' · ');
 }
@@ -965,15 +875,17 @@ function streamFallback(pair) {
 
   // Требование ТЗ: если поток недоступен, показывается последнее значение
   // с пометкой о задержке.
-  if (streamSeed.length > 0) {
-    setStreamSeries(pair, []);
+  streamBaseOnly = false;
+  const saved = streamSeed.filter((p) => p.t >= Date.now() - RT_WINDOW_MS);
+  if (saved.length > 0) {
+    setStreamSeries(pair, saved);
     setChartMeta(`Сохранённые свечи за 15 минут · поток недоступен`);
     return;
   }
   if (pair.rate) {
     const at = new Date(pair.updated_at || Date.now()).getTime();
     streamSeed = [{ t: at - 1000, c: parseFloat(pair.rate) }, { t: at, c: parseFloat(pair.rate) }];
-    setStreamSeries(pair, []);
+    setStreamSeries(pair, streamSeed);
     setChartMeta(`Последний сохранённый курс на ${formatWhen(pair.updated_at)} · поток недоступен`);
     return;
   }

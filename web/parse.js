@@ -80,19 +80,14 @@ export function parseStreamMessage(raw) {
   return { type: 'unknown' };
 }
 
-// Курс пары — отношение цен сторон. Котируемая сторона может не иметь
-// потокового режима: у фиатной валюты котировок внутри суток нет, и сервер
-// её просто не присылает. Тогда берётся её последняя известная цена —
-// тем же переносом, каким сервер считает кросс-курс. Если неизвестна и она,
-// ряд показывает цену базового актива в USDT, и подпись говорит об этом.
-export function crossRate(latest, baseSymbol, quoteSymbol, carried) {
-  const base = latest[baseSymbol];
-  if (base === undefined) return null;
+// Резервные цены обеих сторон берутся из сохранённой истории.
+export function crossRate(latest, baseSymbol, quoteSymbol, carried = {}) {
+  const base = latest[baseSymbol] ?? carried[baseSymbol];
+  const quote = latest[quoteSymbol] ?? carried[quoteSymbol];
+  if (!Number.isFinite(base) || !Number.isFinite(quote) || quote <= 0) return null;
 
-  const quote = latest[quoteSymbol] ?? carried;
-  if (quote === undefined || quote === null) return base;
-  if (!quote) return null;
-  return base / quote;
+  const rate = base / quote;
+  return Number.isFinite(rate) ? rate : null;
 }
 
 // Свеча из нескольких точек ряда: открытие — первая цена интервала, максимум
