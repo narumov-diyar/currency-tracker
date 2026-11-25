@@ -226,3 +226,9 @@ describe('errorText', () => {
     expect(errorText(null, 'нет связи')).toBe('нет связи');
   });
 });
+
+describe('crossRate с последней известной ценой любой стороны', () => {
+  it('считает RUB/BTC по сохранённому курсу рубля при тике BTC', () => {
+    expect(crossRate({ BTC: 50000 }, 'RUB', 'BTC', { RUB: 0.02 })).toBeCloseTo(0.0000004, 12);
+  });
+});
