@@ -1,7 +1,9 @@
 package stream
 
 import (
+	"fmt"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 )
@@ -212,5 +214,57 @@ func TestBufferHoldsFifteenMinutes(t *testing.T) {
 	}
 	if span := snapshot[len(snapshot)-1].At.Sub(snapshot[0].At); span != 899*time.Second {
 		t.Errorf("snapshot spans %s, want just under 15 minutes", span)
+	}
+}
+
+func TestHubRejectsOutOfOrderTick(t *testing.T) {
+	hub := NewHub(4)
+	sub := hub.Subscribe(1)
+	defer hub.Unsubscribe(sub)
+	hub.Publish(Tick{AssetID: 1, Symbol: "BTC", Price: "100", At: 2000})
+	hub.Publish(Tick{AssetID: 1, Symbol: "BTC", Price: "90", At: 1000})
+	hub.Publish(Tick{AssetID: 2, Symbol: "ETH", Price: "40", At: 2000})
+	ticks := sub.Drain()
+	if len(ticks) != 1 || ticks[0].AssetID != 1 || ticks[0].Price != "100" {
+		t.Errorf("drained %v, want only BTC at 100", ticks)
+	}
+	points := hub.Snapshot(1)
+	if len(points) != 1 || points[0].Price != "100" {
+		t.Fatalf("snapshot %v, want only 100", points)
+	}
+	points[0].Price = "changed"
+	if got := hub.Snapshot(1)[0].Price; got != "100" {
+		t.Errorf("snapshot modification changed buffer to %s", got)
+	}
+}
+
+func TestHubConcurrentPublishAndSubscribe(t *testing.T) {
+	const size = 8
+	hub := NewHub(size)
+	var group sync.WaitGroup
+	for worker := range 12 {
+		group.Go(func() {
+			id := worker%3 + 1
+			price := fmt.Sprint(id)
+			for i := range 100 {
+				sub := hub.Subscribe(id)
+				hub.Publish(Tick{AssetID: id, Price: price, At: int64(i+worker) * 1000})
+				_ = hub.Snapshot(id)
+				_ = sub.Drain()
+				hub.Unsubscribe(sub)
+			}
+		})
+	}
+	group.Wait()
+	for id := 1; id <= 3; id++ {
+		points := hub.Snapshot(id)
+		if len(points) != size || hub.SubscriberCount(id) != 0 {
+			t.Fatalf("asset %d: %d points, %d subscribers", id, len(points), hub.SubscriberCount(id))
+		}
+		for i, point := range points {
+			if point.Price != fmt.Sprint(id) || (i > 0 && point.At.Before(points[i-1].At)) {
+				t.Fatalf("asset %d: invalid point %v at index %d", id, point, i)
+			}
+		}
 	}
 }
