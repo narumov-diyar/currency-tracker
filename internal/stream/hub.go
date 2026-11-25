@@ -70,15 +70,13 @@ func (h *Hub) Publish(tick Tick) {
 		buffer = NewBuffer(h.size)
 		h.buffers[tick.AssetID] = buffer
 	}
-	subscribers := make([]*Subscriber, 0, len(h.subs[tick.AssetID]))
-	for sub := range h.subs[tick.AssetID] {
-		subscribers = append(subscribers, sub)
+	// Держим порядок между записью и рассылкой, в том числе если
+	// подписчик забирает накопленные котировки между публикациями.
+	defer h.mu.Unlock()
+	if !buffer.Add(Point{At: time.UnixMilli(tick.At), Price: tick.Price}) {
+		return
 	}
-	h.mu.Unlock()
-
-	buffer.Add(Point{At: time.UnixMilli(tick.At), Price: tick.Price})
-
-	for _, sub := range subscribers {
+	for sub := range h.subs[tick.AssetID] {
 		sub.push(tick)
 	}
 }
