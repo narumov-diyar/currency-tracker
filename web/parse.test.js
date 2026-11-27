@@ -161,19 +161,19 @@ describe('crossRate', () => {
   });
 
   // У фиатной стороны потокового режима нет, сервер её не присылает.
-  it('отдаёт цену базового актива, если котируемый не передаётся', () => {
-    expect(crossRate({ BTC: 76400 }, 'BTC', 'RUB')).toBe(76400);
+  it('возвращает null, если котируемый не передаётся', () => {
+    expect(crossRate({ BTC: 76400 }, 'BTC', 'RUB')).toBeNull();
   });
 
   // Последняя известная цена фиата действует до следующих суток, поэтому
   // курс пары по ней считается так же, как его считает сервер.
   it('подставляет последнюю известную цену котируемой стороны', () => {
-    expect(crossRate({ BTC: 76400 }, 'BTC', 'RUB', 0.0119)).toBeCloseTo(6420168, 0);
+    expect(crossRate({ BTC: 76400 }, 'BTC', 'RUB', { RUB: 0.0119 })).toBeCloseTo(6420168, 0);
   });
 
   // Живая котировка главнее перенесённой.
   it('предпочитает котировку потока перенесённой', () => {
-    expect(crossRate({ BTC: 76400, RUB: 0.0119 }, 'BTC', 'RUB', 0.5)).toBeCloseTo(6420168, 0);
+    expect(crossRate({ BTC: 76400, RUB: 0.0119 }, 'BTC', 'RUB', { RUB: 0.5 })).toBeCloseTo(6420168, 0);
   });
 
   it('молчит, пока не пришла первая котировка базового актива', () => {
@@ -224,5 +224,11 @@ describe('errorText', () => {
     expect(errorText({ error: 'pair already exists' })).toBe('pair already exists');
     expect(errorText({ message: 'не оттуда' })).toBe('Ошибка сервера');
     expect(errorText(null, 'нет связи')).toBe('нет связи');
+  });
+});
+
+describe('crossRate с последней известной ценой любой стороны', () => {
+  it('считает RUB/BTC по сохранённому курсу рубля при тике BTC', () => {
+    expect(crossRate({ BTC: 50000 }, 'RUB', 'BTC', { RUB: 0.02 })).toBeCloseTo(0.0000004, 12);
   });
 });
