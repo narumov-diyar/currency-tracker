@@ -45,21 +45,21 @@ func NewBuffer(size int) *Buffer {
 // пришедшая внутри того же шага, замещает предыдущую, а не добавляется.
 // Пришедшая с временем раньше последней отбрасывается — биржа может
 // переставить сообщения местами, и затирать свежую цену устаревшей нельзя.
-func (b *Buffer) Add(point Point) {
+func (b *Buffer) Add(point Point) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
 	if b.next > 0 || b.filled {
 		last := &b.points[(b.next-1+len(b.points))%len(b.points)]
 		if point.At.Before(last.At) {
-			return
+			return false
 		}
 		// Сравниваются границы шага, а не разница времён: иначе каждая
 		// следующая котировка отодвигала бы точку отсчёта на себя,
 		// и в буфере навсегда осталось бы одно значение.
 		if point.At.Truncate(b.step).Equal(last.At.Truncate(b.step)) {
 			*last = point
-			return
+			return true
 		}
 	}
 
@@ -69,6 +69,7 @@ func (b *Buffer) Add(point Point) {
 		b.next = 0
 		b.filled = true
 	}
+	return true
 }
 
 // Snapshot отдаёт накопленные значения по возрастанию времени.
