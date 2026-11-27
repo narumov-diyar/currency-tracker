@@ -98,6 +98,7 @@ LEFT JOIN LATERAL (SELECT close_price FROM price_candles
       AND collected_at <= tip.at - make_interval(mins => coalesce(r.window_minutes, 0))
     ORDER BY collected_at DESC LIMIT 1) ref_q ON true
 WHERE r.status = 'active'
+  AND curr_q.close_price <> 0
   AND (p.base_asset_id = $1 OR p.quote_asset_id = $1)`
 
 func (a *Alerts) PendingForAsset(ctx context.Context, assetID int) ([]PendingRule, error) {
