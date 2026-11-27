@@ -3,7 +3,9 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"math/big"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -113,9 +115,13 @@ func (s *Server) updateAlert(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "target_value must be a positive number")
 		return
 	}
-	if req.Direction != nil && !isDirection(strings.ToLower(*req.Direction)) {
-		writeError(w, http.StatusBadRequest, "direction must be above or below")
-		return
+	if req.Direction != nil {
+		direction := strings.ToLower(strings.TrimSpace(*req.Direction))
+		if !isDirection(direction) {
+			writeError(w, http.StatusBadRequest, "direction must be above or below")
+			return
+		}
+		req.Direction = &direction
 	}
 	if req.WindowMinutes != nil && *req.WindowMinutes <= 0 {
 		writeError(w, http.StatusBadRequest, "window_minutes must be positive")
@@ -185,12 +191,24 @@ func isDirection(value string) bool {
 	return value == "above" || value == "below"
 }
 
-// isPositiveNumber проверяет значение приблизительно, с плавающей точкой.
-// В базу уходит исходная строка, и там оно хранится как numeric без потерь —
-// здесь нужна только понятная ошибка вместо отказа от базы.
+var (
+	alertValuePattern = regexp.MustCompile(`^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$`)
+	minAlertValue     = big.NewRat(1, 100000000)
+	maxAlertValue     = big.NewRat(999999999999999999, 100000000)
+)
+
+// Приблизительная проверка отсекает заведомо далёкие значения, а точная
+// сравнивает границы numeric(18,8), которые float64 различить не может.
 func isPositiveNumber(value string) bool {
-	parsed, err := strconv.ParseFloat(value, 64)
-	return err == nil && parsed > 0
+	if !alertValuePattern.MatchString(value) {
+		return false
+	}
+	approx, err := strconv.ParseFloat(value, 64)
+	if err != nil || approx < 1e-8 || approx > 1e10 {
+		return false
+	}
+	parsed, ok := new(big.Rat).SetString(value)
+	return ok && parsed.Cmp(minAlertValue) >= 0 && parsed.Cmp(maxAlertValue) <= 0
 }
 
 func parseID(w http.ResponseWriter, raw string) (int64, bool) {
