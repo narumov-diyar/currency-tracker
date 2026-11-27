@@ -18,7 +18,7 @@ from typing import Any, Awaitable, Callable, Protocol
 
 import aiohttp
 
-from .candles import QUOTE_SYMBOL, parse_decimal
+from .candles import QUOTE_SYMBOL, parse_price
 from .db import Asset
 from .errors import InvalidResponseError
 from .log import Logger
@@ -94,7 +94,7 @@ def parse_ticker(message: Any) -> tuple[str, str, int] | None:
         ts = int(message["ts"])
     except (KeyError, TypeError, ValueError):
         raise InvalidResponseError(f"ticker {message.get('topic')}: unexpected shape") from None
-    parse_decimal(price)
+    parse_price(price)
     return message["topic"], str(price), ts
 
 

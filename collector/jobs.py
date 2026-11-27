@@ -252,8 +252,8 @@ class FiatJob(Job):
 
         self._logger.warning("switching to backup source", primary=erapi.NAME, backup=cbr.NAME)
         try:
-            day, price = await with_retry(
-                lambda: cbr.fetch_rub(self._fetch),
+            rate = await with_retry(
+                lambda: cbr.fetch_rub(self._fetch, self._clock),
                 attempts=1 if state is State.HALF_OPEN else self._attempts,
                 deadline=deadline, stop=self._stop, logger=self._logger, what=cbr.NAME,
                 base_delay=self._base_delay,
@@ -265,6 +265,10 @@ class FiatJob(Job):
             return
 
         self._backup.record_success()
+        if rate is None:
+            self._logger.info("cbr rate is not effective yet", source=cbr.NAME)
+            return
+        day, price = rate
         saved = await self._store.save_candles([flat_candle(rub.id, rub.resolution, day, price)])
         self._logger.info("fiat cycle finished", source=cbr.NAME, day=day.date().isoformat(),
                           fetched=1, saved=saved)

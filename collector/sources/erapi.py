@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -11,6 +12,7 @@ from ..httpclient import FetchJSON
 
 NAME = "er-api"
 URL = "https://open.er-api.com/v6/latest/USD"
+logger = logging.getLogger(__name__)
 
 
 async def fetch_prices(fetch: FetchJSON, symbols: list[str]) -> tuple[datetime, dict[str, Decimal]]:
@@ -35,7 +37,18 @@ def parse_latest(payload, symbols: list[str]) -> tuple[datetime, dict[str, Decim
     if not isinstance(rates, dict):
         raise InvalidResponseError("er-api: rates is not an object")
 
-    prices = {symbol: unit_price(rates[symbol]) for symbol in symbols if symbol in rates}
+    prices = {}
+    invalid_count = 0
+    for symbol in symbols:
+        if symbol not in rates:
+            continue
+        try:
+            prices[symbol] = unit_price(rates[symbol])
+        except InvalidResponseError as exc:
+            invalid_count += 1
+            logger.warning("er-api: skipped invalid rate for %s: %s", symbol, exc)
+    if invalid_count and not prices:
+        raise InvalidResponseError("er-api: all available requested rates are invalid")
     return day_start(datetime.fromtimestamp(updated, timezone.utc)), prices
 
 

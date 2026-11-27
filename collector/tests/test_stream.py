@@ -290,3 +290,9 @@ def test_stream_ignores_rejected_subscription_and_bad_events(fast):
 
 async def _ready(conn):
     return conn
+
+
+@pytest.mark.parametrize("price", ["0", "99999999999", "0.000000001"])
+def test_parse_ticker_rejects_price_outside_storage_range(price):
+    with pytest.raises(InvalidResponseError):
+        parse_ticker(ticker("BTC", price, 1793194885126))

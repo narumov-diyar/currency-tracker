@@ -41,3 +41,8 @@ __pycache__/
 # Клиентская часть
 node_modules/
 web/dist/
+
+# Локальные отчёты этапа 5
+.coverage
+load/results/
+web/e2e/test-results/

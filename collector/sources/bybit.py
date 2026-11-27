@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Callable
 
-from ..candles import Candle, parse_decimal
+from ..candles import Candle, parse_price, parse_volume
 from ..db import Asset
 from ..errors import InvalidResponseError, RequestRejectedError, TransientError
 from ..httpclient import FetchJSON
@@ -51,7 +51,8 @@ def parse_kline(payload, asset: Asset, now_ms: int) -> Candle:
         rows = payload["result"]["list"]
         row = rows[1]
         start_ms = int(row[0])
-        open_, high, low, close, volume, turnover = (parse_decimal(v) for v in row[1:7])
+        open_, high, low, close = (parse_price(v) for v in row[1:5])
+        volume, turnover = (parse_volume(v) for v in row[5:7])
     except (KeyError, IndexError, TypeError, ValueError):
         raise InvalidResponseError(f"kline {asset.symbol}: unexpected shape") from None
 

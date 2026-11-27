@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   push:
   pull_request:
     branches: [main]
@@ -123,11 +124,26 @@ jobs:
         run: docker logs api
 
   # Задания без needs выполняются параллельно, и падение одного не отменяет
-  # остальные. Тестам сборщика база и сеть не нужны: источники и хранилище
-  # в них подменяются.
+  # остальные. PostgreSQL нужен для интеграционных тестов записи свечей.
   collector:
     name: Сборщик
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: tracker
+          POSTGRES_PASSWORD: tracker
+          POSTGRES_DB: tracker
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://tracker:tracker@localhost:5432/tracker?sslmode=disable
 
     steps:
       - uses: actions/checkout@v4
@@ -206,3 +222,44 @@ jobs:
         run: |
           docker compose logs --no-color
           docker compose down --volumes
+
+  browser-smoke:
+    name: Браузерный smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Регистрация, сохранение пары и оповещение
+        env:
+          LOAD_OUTPUT: ${{ github.workspace }}/load/results/browser
+        run: bash scripts/load.sh browser
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-trace
+          path: load/results/browser/playwright/
+          if-no-files-found: ignore
+
+  load-smoke:
+    name: Короткая проверка k6
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Смесь запросов на тестовом стенде
+        env:
+          LOAD_QUICK: "1"
+          LOAD_USERS: "20"
+          LOAD_MIX_SECONDS: "30"
+          LOAD_OUTPUT: ${{ github.workspace }}/load/results/ci
+        run: bash scripts/load.sh mix
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: load-smoke-results
+          path: load/results/ci/

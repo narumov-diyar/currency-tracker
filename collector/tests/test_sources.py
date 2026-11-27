@@ -153,7 +153,7 @@ CBR = {
 
 
 def test_cbr_rub_price():
-    day, price = cbr.parse_daily(CBR)
+    day, price = cbr.parse_daily(CBR, now=datetime(2026, 10, 28, tzinfo=timezone.utc))
 
     assert day == datetime(2026, 10, 28, tzinfo=timezone.utc)
     assert price == Decimal("0.01190476")
@@ -161,7 +161,8 @@ def test_cbr_rub_price():
 
 def test_cbr_respects_nominal():
     payload = {"Date": CBR["Date"], "Valute": {"USD": {"Nominal": 10, "Value": 840}}}
-    assert cbr.parse_daily(payload)[1] == Decimal("0.01190476")
+    _, price = cbr.parse_daily(payload, now=datetime(2026, 10, 28, tzinfo=timezone.utc))
+    assert price == Decimal("0.01190476")
 
 
 @pytest.mark.parametrize("payload", [
@@ -174,3 +175,37 @@ def test_cbr_respects_nominal():
 def test_cbr_malformed(payload):
     with pytest.raises(InvalidResponseError):
         cbr.parse_daily(payload)
+
+
+@pytest.mark.parametrize(("field", "value"), [
+    (1, "0"), (2, "99999999999"), (3, "0"), (4, "0"),
+    (4, "99999999999"), (4, "0.000000001"),
+    (5, "10000000000000000"), (6, "10000000000000000"),
+])
+def test_kline_rejects_values_outside_storage_range(field, value):
+    rows = KLINE["result"]["list"]
+    closed = rows[1].copy()
+    closed[field] = value
+    payload = {**KLINE, "result": {**KLINE["result"], "list": [rows[0], closed]}}
+    with pytest.raises(InvalidResponseError):
+        bybit.parse_kline(payload, BTC, now_ms=1793136835945)
+
+
+@pytest.mark.parametrize("bad_rate", [0, "abc", "1e-40"])
+def test_erapi_skips_only_invalid_currency(bad_rate, caplog):
+    payload = {**ERAPI, "rates": {**ERAPI["rates"], "RUB": bad_rate}}
+    _, prices = erapi.parse_latest(payload, ["USD", "RUB", "EUR"])
+    assert prices == {"USD": Decimal("1.00000000"), "EUR": Decimal("1.08695652")}
+    assert "RUB" in caplog.text
+
+
+def test_erapi_rejects_response_when_all_requested_rates_are_invalid():
+    payload = {**ERAPI, "rates": {"RUB": 0}}
+    with pytest.raises(InvalidResponseError):
+        erapi.parse_latest(payload, ["RUB"])
+
+
+def test_cbr_skips_future_day_until_utc_midnight():
+    assert cbr.parse_daily(CBR, now=datetime(2026, 10, 27, 23, 59, tzinfo=timezone.utc)) is None
+    day, _ = cbr.parse_daily(CBR, now=datetime(2026, 10, 28, tzinfo=timezone.utc))
+    assert day == datetime(2026, 10, 28, tzinfo=timezone.utc)

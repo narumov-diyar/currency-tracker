@@ -11,6 +11,7 @@ from .errors import InvalidResponseError
 # Масштаб столбцов цены в price_candles: numeric(18, 8).
 PRICE_QUANTUM = Decimal("0.00000001")
 MAX_PRICE = Decimal("9999999999.99999999")
+MAX_VOLUME = Decimal("9999999999999999.99999999")
 
 # Валюта, в которой выражены все цены. Цена её самой — единица по определению.
 QUOTE_SYMBOL = "USDT"
@@ -47,6 +48,20 @@ def parse_decimal(raw) -> Decimal:
     return value
 
 
+def parse_price(raw) -> Decimal:
+    price = parse_decimal(raw)
+    if not PRICE_QUANTUM <= price <= MAX_PRICE:
+        raise InvalidResponseError(f"price {raw!r} is outside storage range")
+    return price
+
+
+def parse_volume(raw) -> Decimal:
+    value = parse_decimal(raw)
+    if value > MAX_VOLUME:
+        raise InvalidResponseError(f"volume or turnover {raw!r} is above storage range")
+    return value
+
+
 def unit_price(units_per_usd) -> Decimal:
     """Переводит курс «сколько единиц валюты за доллар» в цену одной единицы.
 
@@ -58,7 +73,10 @@ def unit_price(units_per_usd) -> Decimal:
     rate = parse_decimal(units_per_usd)
     if rate == 0:
         raise InvalidResponseError("zero exchange rate")
-    price = (Decimal(1) / rate).quantize(PRICE_QUANTUM, rounding=ROUND_HALF_EVEN)
+    try:
+        price = (Decimal(1) / rate).quantize(PRICE_QUANTUM, rounding=ROUND_HALF_EVEN)
+    except ArithmeticError:
+        raise InvalidResponseError(f"rate {units_per_usd!r} is outside storage range") from None
     if price == 0:
         raise InvalidResponseError(f"rate {units_per_usd!r} is below storage precision")
     if price > MAX_PRICE:

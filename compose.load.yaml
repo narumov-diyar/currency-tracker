@@ -1,0 +1,86 @@
+# Отдельный стенд. База и API доступны только из сети этого проекта.
+services:
+  db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: tracker
+      POSTGRES_PASSWORD: load-only-password
+      POSTGRES_DB: tracker_load
+    volumes:
+      - load-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "tracker", "-d", "tracker_load"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  api:
+    image: ${LOAD_API_IMAGE:-currency-tracker-load-api:local}
+    build:
+      context: .
+      target: api
+    environment: &database
+      DATABASE_URL: postgres://tracker:load-only-password@db:5432/tracker_load?sslmode=disable
+      AUTH_SECRET: load-only-secret-for-an-isolated-test-network
+      GODEBUG: ${LOAD_GO_DEBUG:-}
+    depends_on:
+      db:
+        condition: service_healthy
+  devseed:
+    image: ${LOAD_DEVSEED_IMAGE:-currency-tracker-load-devseed:local}
+    profiles: [tools]
+    build:
+      context: .
+      target: devseed
+    environment: *database
+  tickgen:
+    image: ${LOAD_TICKGEN_IMAGE:-currency-tracker-load-tickgen:local}
+    profiles: [tools]
+    build:
+      context: .
+      dockerfile: load/tickgen/Dockerfile
+    environment: *database
+  k6:
+    profiles: [tools]
+    image: grafana/k6:1.0.0
+    user: "${LOAD_UID:-1000}:${LOAD_GID:-1000}"
+    environment:
+      LOAD_USERS: ${LOAD_USERS:-200}
+      LOAD_QUICK: ${LOAD_QUICK:-0}
+      LOAD_MIX_SECONDS: ${LOAD_MIX_SECONDS:-300}
+      LOAD_MAX_RATE: ${LOAD_MAX_RATE:-360}
+      LOAD_WS_SECONDS: ${LOAD_WS_SECONDS:-60}
+      LOAD_SOAK_SECONDS: ${LOAD_SOAK_SECONDS:-1800}
+    volumes:
+      - ./load:/scenarios:ro
+      - ${LOAD_OUTPUT:-./load/results}:/results
+  web:
+    profiles: [browser]
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      target: runtime
+    environment:
+      API_URL: http://api:8080
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  browser:
+    profiles: [browser]
+    build:
+      context: web/e2e
+    network_mode: "service:web"
+    depends_on:
+      web:
+        condition: service_healthy
+    environment:
+      BASE_URL: http://127.0.0.1:3000
+      CI: "true"
+    volumes:
+      - ${LOAD_OUTPUT:-./load/results}:/results
+volumes:
+  load-data:
